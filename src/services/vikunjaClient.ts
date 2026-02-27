@@ -102,8 +102,8 @@ export class VikunjaClient {
   }
 
   async updateTask(taskId: number, patch: TaskPatch): Promise<void> {
-    // We need to send the full task for PATCH to work in Vikunja.
-    // First fetch the current task, then merge.
+    // Vikunja uses POST (not PATCH/PUT) for task updates and requires the full
+    // task object in the body — partial updates are not supported.
     const current = await this.request<Task>(`/tasks/${taskId}`);
 
     const merged: Task = {
@@ -112,7 +112,7 @@ export class VikunjaClient {
     };
 
     await this.request<Task>(`/tasks/${taskId}`, {
-      method: 'PATCH',
+      method: 'POST',
       body: merged,
     });
   }

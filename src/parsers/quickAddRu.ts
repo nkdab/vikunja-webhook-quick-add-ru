@@ -21,6 +21,16 @@ export interface ParsedTaskPatch {
 }
 
 // ---------------------------------------------------------------------------
+// Unicode-aware word boundaries
+//
+// JavaScript \b only works with ASCII \w ([a-zA-Z0-9_]).
+// Cyrillic characters are all \W, so \b never fires adjacent to them.
+// We use explicit negative lookahead/lookbehind instead.
+// ---------------------------------------------------------------------------
+const S = '(?<![а-яёА-ЯЁa-zA-Z0-9])'; // word start (not preceded by alphanum)
+const E = '(?![а-яёА-ЯЁa-zA-Z0-9])';  // word end   (not followed by alphanum)
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -136,9 +146,11 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
   const patch: ParsedTaskPatch = {};
 
   // ── 1. Priority ──────────────────────────────────────────────────────────
-  const prioNumRe = /!([1-5])\b/i;
+  // !1..5 — \b after digit is fine (digit is ASCII \w)
+  const prioNumRe = /!([1-5])(?![0-9])/i;
   const prioWordKeys = Object.keys(PRIORITY_MAP).join('|');
-  const prioWordRe = new RegExp(`!(${prioWordKeys})\\b`, 'i');
+  // \b doesn't work after Cyrillic → use E
+  const prioWordRe = new RegExp(`!(${prioWordKeys})${E}`, 'i');
 
   const prioNumMatch = remaining.match(prioNumRe);
   const prioWordMatch = remaining.match(prioWordRe);
@@ -178,7 +190,6 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
   }
   remaining = remaining.replace(labelQuotedRe, ' ');
 
-  // Reset lastIndex after replace
   labelSimpleRe.lastIndex = 0;
   while ((labelMatch = labelSimpleRe.exec(remaining)) !== null) {
     labels.push((labelMatch[1] as string).trim());
@@ -188,10 +199,10 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
   if (labels.length > 0) patch.labels = labels;
 
   // ── 4. Explicit time extraction ───────────────────────────────────────────
-  // Matches: "в 18:00", "18:30", "в 09:15"  (colon form has priority)
+  // "в 18:00", "18:30", "в 09:15" — uses digits (ASCII), no Cyrillic \b issue
   const explicitTimeRe = /(?:в\s+)?(\d{1,2}):(\d{2})(?!\d)/i;
-  // Matches: "в 9" (hour only, no colon)
-  const hourOnlyTimeRe = /\bв\s+(\d{1,2})\b(?!:)/i;
+  // "в 9" (hour only, no colon) — "в" is Cyrillic, use S before it
+  const hourOnlyTimeRe = new RegExp(`${S}в\\s+(\\d{1,2})(?!\\d)(?!:)`, 'i');
 
   let parsedHour: number | undefined;
   let parsedMinute: number | undefined;
@@ -211,7 +222,8 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
 
   // ── 5. Time-of-day markers ────────────────────────────────────────────────
   const timeMarkerKeys = Object.keys(TIME_MARKER_MAP).join('|');
-  const timeMarkerRe = new RegExp(`\\b(${timeMarkerKeys})\\b`, 'i');
+  // Cyrillic words → use S/E instead of \b
+  const timeMarkerRe = new RegExp(`${S}(${timeMarkerKeys})${E}`, 'i');
 
   let markerHour: number | undefined;
   let markerMinute: number | undefined;
@@ -239,18 +251,22 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
   }
 
   // ── 6. Recurrence ─────────────────────────────────────────────────────────
-  const everyDayRe = /\bкаждый\s+день\b/i;
-  const everyWeekRe = /\bкаждую\s+неделю\b/i;
-  const everyMonthRe = /\bкаждый\s+месяц\b/i;
-  const everyHourRe = /\bкаждый\s+час\b/i;
-  const everyNHoursRe = /\bкаждые\s+(\d+)\s+часов?\b/i;
   const weekdayKeys = Object.keys(WEEKDAY_MAP).join('|');
+
+  // All Cyrillic → use S/E
+  const everyDayRe     = new RegExp(`${S}каждый\\s+день${E}`, 'i');
+  const everyWeekRe    = new RegExp(`${S}каждую\\s+неделю${E}`, 'i');
+  const everyMonthRe   = new RegExp(`${S}каждый\\s+месяц${E}`, 'i');
+  const everyHourRe    = new RegExp(`${S}каждый\\s+час${E}`, 'i');
+  // часа (2–4) / часов (5+) — both genitive forms
+  const everyNHoursRe  = new RegExp(`${S}каждые\\s+(\\d+)\\s+час(?:а|ов)?${E}`, 'i');
+  const secondDayOfWeekRe = new RegExp(`${S}второй\\s+день\\s+каждой\\s+недели${E}`, 'i');
   const everyWeekdayRe = new RegExp(
-    `\\b(?:каждый|каждую|каждое)\\s+(${weekdayKeys})\\b`,
-    'i'
+    `${S}(?:каждый|каждую|каждое)\\s+(${weekdayKeys})${E}`, 'i'
   );
-  const everyDayOfMonthRe = /\bкаждое\s+(\d{1,2})\s+числ[оа]?\b/i;
-  const secondDayOfWeekRe = /\bвторой\s+день\s+каждой\s+недели\b/i;
+  const everyDayOfMonthRe = new RegExp(
+    `${S}каждое\\s+(\\d{1,2})\\s+числ[оа]?${E}`, 'i'
+  );
 
   if (everyDayRe.test(remaining)) {
     patch.repeat_after = 86400;
@@ -314,14 +330,14 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
   }
 
   // ── 7. Date expressions ───────────────────────────────────────────────────
-  const todayRe = /\b(сегодня|today)\b/i;
-  const tomorrowRe = /\b(завтра|tomorrow)\b/i;
-  const dayAfterTomorrowRe = /\bпослезавтра\b/i;
-  const inNDaysRe = /\bчерез\s+(\d+)\s+дн[еёяй]?\b/i;
-  const weekdayOnceRe = new RegExp(
-    `\\b(?:в\\s+)?(${weekdayKeys})\\b`,
-    'i'
-  );
+  // All Cyrillic → use S/E. "today"/"tomorrow" are ASCII but same treatment is safe.
+  const todayRe          = new RegExp(`${S}(сегодня|today)${E}`, 'i');
+  const tomorrowRe       = new RegExp(`${S}(завтра|tomorrow)${E}`, 'i');
+  const dayAfterTomorrowRe = new RegExp(`${S}послезавтра${E}`, 'i');
+  // день (1) / дня (2-4) / дней (5+) — cover all forms
+  const inNDaysRe        = new RegExp(`${S}через\\s+(\\d+)\\s+(?:дней|дня|день|дне|дни)${E}`, 'i');
+  // "во вторник" / "в среду" / "вторник" — allow optional "во?" prefix
+  const weekdayOnceRe    = new RegExp(`${S}(?:во?\\s+)?(${weekdayKeys})${E}`, 'i');
 
   if (patch.due_date === undefined) {
     if (todayRe.test(remaining)) {
@@ -369,8 +385,7 @@ export function parseQuickAddRu(text: string, now: Date = new Date()): ParsedTas
     patch.repeat_after < 86400 &&
     patch.due_date === undefined
   ) {
-    const base = ceilToHour(now);
-    patch.due_date = toIso(base);
+    patch.due_date = toIso(ceilToHour(now));
   }
 
   // ── 10. Monthly repeat fallback: use today if no date ────────────────────

@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(npm test)",
+      "Bash(git -C /Users/aleksandrivanov/personal/second_brain/orchestartor log --oneline)",
+      "Bash(git -C /Users/aleksandrivanov/personal/second_brain/orchestartor diff HEAD --stat)",
+      "Bash(git -C /Users/aleksandrivanov/personal/second_brain/orchestartor status)"
     ]
   }
 }

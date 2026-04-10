@@ -1,4 +1,4 @@
-# Second Brain Orchestrator
+# Quick Add service for Vikunja in russian language
 
 Vikunja webhook enrichment service. Listens for `task.created` events and automatically parses Russian/English quick-add markers from the task title to set due dates, priorities, projects, labels, and recurrence.
 
